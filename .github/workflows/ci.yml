@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/IczpNet.CodeGenerator.WebUi/pnpm-lock.yaml
+      - run: dotnet build IczpNet.CodeGenerator.sln --no-restore
+      - run: dotnet test tests/IczpNet.CodeGenerator.Core.Tests/IczpNet.CodeGenerator.Core.Tests.csproj --no-restore
+      - run: pnpm install --frozen-lockfile; pnpm build
+        working-directory: ui/IczpNet.CodeGenerator.WebUi
+  cms-integration:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Validate Article against required local CMS fixture
+        shell: pwsh
+        run: .\scripts\verify-cms-integration.ps1

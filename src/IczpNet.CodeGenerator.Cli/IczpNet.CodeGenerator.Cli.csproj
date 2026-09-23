@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>abpgen</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\IczpNet.CodeGenerator.Core\\IczpNet.CodeGenerator.Core.csproj" />
+    <ProjectReference Include="..\\IczpNet.CodeGenerator.Roslyn\\IczpNet.CodeGenerator.Roslyn.csproj" />
+  </ItemGroup>
+</Project>

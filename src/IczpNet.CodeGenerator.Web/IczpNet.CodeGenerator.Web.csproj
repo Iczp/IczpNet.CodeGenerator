@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\\IczpNet.CodeGenerator.Core\\IczpNet.CodeGenerator.Core.csproj" />
+    <ProjectReference Include="..\\IczpNet.CodeGenerator.Roslyn\\IczpNet.CodeGenerator.Roslyn.csproj" />
+  </ItemGroup>
+</Project>
