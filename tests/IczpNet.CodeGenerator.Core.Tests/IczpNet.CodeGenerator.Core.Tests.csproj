@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/IczpNet.CodeGenerator.Core/IczpNet.CodeGenerator.Core.csproj" />
+    <ProjectReference Include="../../src/IczpNet.CodeGenerator.Roslyn/IczpNet.CodeGenerator.Roslyn.csproj" />
   </ItemGroup>
 </Project>

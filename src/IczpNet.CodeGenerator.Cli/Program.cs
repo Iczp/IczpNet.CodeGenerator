@@ -26,6 +26,7 @@ internal static class App
                 "init-entity" => await InitEntityAsync(args.Skip(1).ToArray()),
                 "generate" => await GenerateAsync(args.Skip(1).ToArray()),
                 "validate" => await ValidateAsync(args.Skip(1).ToArray()),
+                "recover" => Recover(args.Skip(1).ToArray()),
                 "ui" => await UiAsync(args.Skip(1).ToArray()),
                 _ => Help()
             };
@@ -45,7 +46,7 @@ internal static class App
         var config = Path.Combine(root, ".codegen", "config.json");
         if (!File.Exists(config))
         {
-            File.WriteAllText(config, JsonSerializer.Serialize(new { defaultProfile = "iczp-ddd" }, JsonOptions));
+            File.WriteAllText(config, JsonSerializer.Serialize(new { defaultProfile = "abp-10.6" }, JsonOptions));
         }
 
         Console.WriteLine($"Initialized .codegen in {root}");
@@ -76,12 +77,12 @@ internal static class App
         var model = FindEntity(root, entity);
         var format = OptionValue(args, "--format") ?? "json";
         if (format is not ("json" or "yaml")) throw new ArgumentException("--format must be json or yaml.");
-        DescriptorStore.Save(root, new EntityDescriptor { Entity = model.FullName, Profile = "iczp-ddd" }, format);
+        DescriptorStore.Save(root, new EntityDescriptor { Entity = model.FullName, Profile = "abp-10.6" }, format);
         Console.WriteLine(Path.Combine(root, ".codegen", "entities", $"{model.Name}.codegen.{(format == "yaml" ? "yaml" : "json")}"));
         return Task.FromResult(0);
     }
 
-    private static Task<int> GenerateAsync(string[] args)
+    private static async Task<int> GenerateAsync(string[] args)
     {
         var entityName = RequireEntity(args);
         var root = ProjectPath(args);
@@ -93,14 +94,14 @@ internal static class App
         {
             Console.WriteLine($"{file.Action.ToString().ToUpperInvariant(),-8} {file.Path}");
             if (!string.IsNullOrWhiteSpace(file.Diff)) Console.WriteLine(file.Diff);
-            if (!dryRun && file.Action is PlannedFileAction.Create or PlannedFileAction.Update)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(file.Path)!);
-                File.WriteAllText(file.Path, file.Content);
-            }
         }
-
-        return Task.FromResult(plan.HasConflicts ? 3 : 0);
+        if (plan.HasConflicts) return 3;
+        if (dryRun) return 0;
+        var validation = await GenerationWorkflow.ValidateAsync(plan, layout);
+        foreach (var line in validation.Logs) Console.WriteLine(line);
+        if (!validation.Succeeded) return 4;
+        foreach (var line in GenerationWorkflow.Apply(plan, layout.SolutionRoot)) Console.WriteLine(line);
+        return 0;
     }
 
     private static async Task<int> ValidateAsync(string[] args)
@@ -108,23 +109,22 @@ internal static class App
         var entity = FindEntity(ProjectPath(args), RequireEntity(args));
         var layout = AbpProjectLayoutResolver.Resolve(ProjectPath(args), entity);
         var plan = GenerationService.CreateDtoPlan(entity, layout, DescriptorStore.Load(ProjectPath(args), entity.Name));
-        if (plan.HasConflicts)
-        {
-            foreach (var file in plan.Files.Where(x => x.Action == PlannedFileAction.Conflict)) Console.Error.WriteLine($"CONFLICT {file.Path}: {file.Diff}");
-            return 3;
-        }
+        if (plan.HasConflicts) return 3;
+        var validation = await GenerationWorkflow.ValidateAsync(plan, layout);
+        foreach (var line in validation.Logs) Console.WriteLine(line);
+        return validation.Succeeded ? 0 : 4;
+    }
 
-        foreach (var project in new[] { layout.ContractsProject, layout.ApplicationProject, layout.EntityFrameworkCoreProject })
+    private static int Recover(string[] args)
+    {
+        var root = ProjectPath(args);
+        for (var current = new DirectoryInfo(root); current is not null; current = current.Parent)
         {
-            var csproj = Directory.EnumerateFiles(project, "*.csproj").Single();
-            var process = Process.Start(new ProcessStartInfo("dotnet", $"build \"{csproj}\" --nologo") { UseShellExecute = false })
-                ?? throw new InvalidOperationException("Could not start dotnet build.");
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0) return process.ExitCode;
+            if (!Directory.Exists(Path.Combine(current.FullName, "src"))) continue;
+            foreach (var log in GenerationWorkflow.Recover(current.FullName)) Console.WriteLine(log);
+            return 0;
         }
-
-        Console.WriteLine("Validation passed.");
-        return 0;
+        throw new InvalidOperationException($"Could not find a solution root containing 'src' above {root}.");
     }
 
     private static async Task<int> UiAsync(string[] args)
@@ -218,6 +218,7 @@ internal static class App
         Console.WriteLine("abpgen init-entity <entity> [--project <path>] [--format json|yaml]");
         Console.WriteLine("abpgen generate <entity> [--project <path>] [--dry-run]");
         Console.WriteLine("abpgen validate <entity> [--project <path>]");
+        Console.WriteLine("abpgen recover --project <solution-root>");
         Console.WriteLine("abpgen ui --project <path> [--port 5178]");
         return 1;
     }

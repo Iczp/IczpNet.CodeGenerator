@@ -45,11 +45,7 @@ public sealed class EntityScanner
             var properties = type.Members.OfType<PropertyDeclarationSyntax>()
                 .Where(x => x.Modifiers.Any(SyntaxKind.PublicKeyword))
                 .Where(x => x.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true)
-                .Select(x => new EntityPropertyModel(
-                    x.Identifier.Text,
-                    x.Type.ToString(),
-                    x.Type is NullableTypeSyntax || x.Type.ToString().EndsWith('?'),
-                    SystemManagedProperties.Contains(x.Identifier.Text)))
+                .Select(CreatePropertyModel)
                 .ToArray();
 
             if (properties.Length == 0)
@@ -60,9 +56,105 @@ public sealed class EntityScanner
             var keyType = ResolveKeyType(baseType);
             var fullName = string.IsNullOrWhiteSpace(namespaceName) ? type.Identifier.Text : $"{namespaceName}.{type.Identifier.Text}";
             yield return new EntityModel(type.Identifier.Text, namespaceName, baseType, keyType, properties,
-                EntityFingerprint.Create(fullName, baseType, properties));
+                EntityFingerprint.Create(fullName, baseType, properties),
+                type.Members.OfType<ConstructorDeclarationSyntax>().Select(CreateConstructorModel).ToArray(),
+                type.Members.OfType<MethodDeclarationSyntax>().Where(IsDomainMethod).Select(CreateMethodModel).ToArray());
         }
     }
+
+    private static EntityPropertyModel CreatePropertyModel(PropertyDeclarationSyntax property)
+    {
+        var attributes = property.AttributeLists.SelectMany(x => x.Attributes).ToArray();
+        var typeName = property.Type.ToString();
+        var constraints = new EntityPropertyConstraints(
+            IsRequired: HasAttribute(attributes, "Required"),
+            MaxLength: IntegerAttributeArgument(attributes, "MaxLength"),
+            StringLength: IntegerAttributeArgument(attributes, "StringLength"),
+            RangeMinimum: StringAttributeArgument(attributes, "Range", 0),
+            RangeMaximum: StringAttributeArgument(attributes, "Range", 1),
+            RegularExpression: StringAttributeArgument(attributes, "RegularExpression"),
+            DefaultValue: StringAttributeArgument(attributes, "DefaultValue"));
+        var hasConstraints = constraints != new EntityPropertyConstraints();
+        return new EntityPropertyModel(
+            property.Identifier.Text,
+            typeName,
+            property.Type is NullableTypeSyntax || typeName.EndsWith('?'),
+            SystemManagedProperties.Contains(property.Identifier.Text),
+            Documentation(property),
+            hasConstraints ? constraints : null,
+            property.AccessorList?.Accessors.Any(x => x.IsKind(SyntaxKind.SetAccessorDeclaration) && x.Modifiers.Count == 0) == true,
+            IsCollection(typeName));
+    }
+
+    private static EntityConstructorModel CreateConstructorModel(ConstructorDeclarationSyntax constructor)
+        => new(
+            constructor.Modifiers.Any(SyntaxKind.PublicKeyword),
+            constructor.ParameterList.Parameters.Select(CreateParameterModel).ToArray());
+
+    private static EntityMethodModel CreateMethodModel(MethodDeclarationSyntax method)
+        => new(
+            method.Identifier.Text,
+            method.Modifiers.Any(SyntaxKind.PublicKeyword),
+            method.ParameterList.Parameters.Select(CreateParameterModel).ToArray());
+
+    private static EntityConstructorParameter CreateParameterModel(ParameterSyntax parameter)
+    {
+        var typeName = parameter.Type?.ToString() ?? "object";
+        return new EntityConstructorParameter(parameter.Identifier.Text, typeName,
+            parameter.Type is NullableTypeSyntax || typeName.EndsWith('?'));
+    }
+
+    private static bool IsDomainMethod(MethodDeclarationSyntax method)
+        => method.Modifiers.Any(SyntaxKind.PublicKeyword)
+            && !method.Modifiers.Any(SyntaxKind.StaticKeyword)
+            && method.ReturnType is PredefinedTypeSyntax predefined
+            && predefined.Keyword.IsKind(SyntaxKind.VoidKeyword);
+
+    private static bool HasAttribute(IEnumerable<AttributeSyntax> attributes, string name)
+        => attributes.Any(attribute => AttributeName(attribute) == name);
+
+    private static int? IntegerAttributeArgument(IEnumerable<AttributeSyntax> attributes, string name)
+    {
+        var value = StringAttributeArgument(attributes, name);
+        return int.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static string? StringAttributeArgument(IEnumerable<AttributeSyntax> attributes, string name, int position = 0)
+    {
+        var attribute = attributes.FirstOrDefault(candidate => AttributeName(candidate) == name);
+        var argument = attribute?.ArgumentList?.Arguments.ElementAtOrDefault(position)?.Expression;
+        return argument switch
+        {
+            LiteralExpressionSyntax literal => literal.Token.ValueText,
+            _ => argument?.ToString()
+        };
+    }
+
+    private static string AttributeName(AttributeSyntax attribute)
+    {
+        var name = attribute.Name.ToString().Split('.').Last();
+        return name.EndsWith("Attribute", StringComparison.Ordinal) ? name[..^"Attribute".Length] : name;
+    }
+
+    private static string? Documentation(MemberDeclarationSyntax member)
+    {
+        var documentation = member.GetLeadingTrivia()
+            .Select(trivia => trivia.GetStructure())
+            .OfType<DocumentationCommentTriviaSyntax>()
+            .FirstOrDefault();
+        if (documentation is null) return null;
+        var summary = documentation.Content.OfType<XmlElementSyntax>()
+            .FirstOrDefault(element => element.StartTag.Name.LocalName.Text == "summary");
+        var text = (summary?.Content ?? documentation.Content).ToFullString().Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static bool IsCollection(string typeName)
+        => typeName.StartsWith("ICollection<", StringComparison.Ordinal)
+            || typeName.StartsWith("IReadOnlyCollection<", StringComparison.Ordinal)
+            || typeName.StartsWith("IEnumerable<", StringComparison.Ordinal)
+            || typeName.StartsWith("List<", StringComparison.Ordinal)
+            || typeName.EndsWith("[]", StringComparison.Ordinal);
 
     private static string ResolveKeyType(string? baseType)
     {

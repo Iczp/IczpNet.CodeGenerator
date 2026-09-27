@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug CLI Generate Article",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build generator",
+      "program": "${workspaceFolder}/src/IczpNet.CodeGenerator.Cli/bin/Debug/net10.0/abpgen.dll",
+      "cwd": "${workspaceFolder}",
+      "args": ["generate", "Article", "--project", "F:/Dev/abpvnext/IczpNet.Cms/aspnet-core/src/IczpNet.Cms.Domain"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug Web Host",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build generator",
+      "program": "${workspaceFolder}/src/IczpNet.CodeGenerator.Web/bin/Debug/net10.0/IczpNet.CodeGenerator.Web.dll",
+      "cwd": "${workspaceFolder}",
+      "args": ["--project", "F:/Dev/abpvnext/IczpNet.Cms/aspnet-core/src/IczpNet.Cms.Domain", "--urls", "http://127.0.0.1:5178"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug Vue UI",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev",
+      "cwd": "${workspaceFolder}/ui/IczpNet.CodeGenerator.WebUi"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Generator Studio",
+      "configurations": ["Debug Web Host", "Debug Vue UI"],
+      "stopAll": true
+    }
+  ]
+}

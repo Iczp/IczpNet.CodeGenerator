@@ -7,5 +7,3 @@ public sealed record DescriptorUpdateRequest(EntityDescriptor Descriptor, string
 public sealed record RawDescriptorUpdateRequest(string Content, string? Format);
 
 public sealed record ExecutionResult(bool Succeeded, IReadOnlyList<string> Logs, GenerationPlan Plan);
-
-public sealed record ProcessResult(int ExitCode, string Output);

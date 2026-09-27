@@ -7,7 +7,24 @@ public sealed record EntityPropertyModel(
     string Name,
     string TypeName,
     bool IsNullable,
-    bool IsSystemManaged);
+    bool IsSystemManaged,
+    string? Documentation = null,
+    EntityPropertyConstraints? Constraints = null,
+    bool HasPublicSetter = false,
+    bool IsCollection = false);
+
+public sealed record EntityPropertyConstraints(
+    bool IsRequired = false,
+    int? MaxLength = null,
+    int? StringLength = null,
+    string? RangeMinimum = null,
+    string? RangeMaximum = null,
+    string? RegularExpression = null,
+    string? DefaultValue = null);
+
+public sealed record EntityConstructorParameter(string Name, string TypeName, bool IsNullable);
+public sealed record EntityConstructorModel(bool IsPublic, IReadOnlyList<EntityConstructorParameter> Parameters);
+public sealed record EntityMethodModel(string Name, bool IsPublic, IReadOnlyList<EntityConstructorParameter> Parameters);
 
 public sealed record EntityModel(
     string Name,
@@ -15,7 +32,9 @@ public sealed record EntityModel(
     string? BaseType,
     string KeyType,
     IReadOnlyList<EntityPropertyModel> Properties,
-    string Fingerprint)
+    string Fingerprint,
+    IReadOnlyList<EntityConstructorModel>? Constructors = null,
+    IReadOnlyList<EntityMethodModel>? DomainMethods = null)
 {
     public string FullName => string.IsNullOrWhiteSpace(Namespace) ? Name : $"{Namespace}.{Name}";
 }
@@ -23,7 +42,7 @@ public sealed record EntityModel(
 public sealed class EntityDescriptor
 {
     public string Entity { get; init; } = string.Empty;
-    public string Profile { get; init; } = "iczp-ddd";
+    public string Profile { get; init; } = "abp-10.6";
     public CrudDescriptor Crud { get; init; } = new();
     public PermissionDescriptor Permissions { get; init; } = new();
     public string DefaultSorting { get; init; } = "CreationTime desc";

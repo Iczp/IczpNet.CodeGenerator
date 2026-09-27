@@ -88,14 +88,32 @@ public static class DescriptorStore
     }
 
     public static EntityDescriptor? Parse(string content, string format)
-        => format.Equals("json", StringComparison.OrdinalIgnoreCase)
+    {
+        var descriptor = format.Equals("json", StringComparison.OrdinalIgnoreCase)
             ? JsonSerializer.Deserialize<EntityDescriptor>(content, JsonOptions)
             : YamlDeserializer.Deserialize<EntityDescriptor>(content);
+        return descriptor is null ? null : NormalizeProfile(descriptor);
+    }
 
     public static string Serialize(EntityDescriptor descriptor, string format)
         => format.Equals("json", StringComparison.OrdinalIgnoreCase)
             ? JsonSerializer.Serialize(descriptor, JsonOptions)
             : YamlSerializer.Serialize(descriptor);
+
+    private static EntityDescriptor NormalizeProfile(EntityDescriptor descriptor)
+        => descriptor.Profile == AbpVersionProfileResolver.NormalizeProfileName(descriptor.Profile)
+            ? descriptor
+            : new EntityDescriptor
+            {
+                Entity = descriptor.Entity,
+                Profile = AbpVersionProfileResolver.NormalizeProfileName(descriptor.Profile),
+                Crud = descriptor.Crud,
+                Permissions = descriptor.Permissions,
+                DefaultSorting = descriptor.DefaultSorting,
+                Construction = descriptor.Construction,
+                Update = descriptor.Update,
+                Properties = descriptor.Properties
+            };
 
     public static string MergeStructuredContent(string current, string generated, string format)
     {

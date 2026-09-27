@@ -68,26 +68,23 @@ app.MapPut("/api/entities/{entity}/descriptor/raw", (string entity, RawDescripto
     return Results.Ok(new { descriptor, format, raw = request.Content });
 });
 app.MapPost("/api/generation/plan", (GenerationRequest request) => Results.Ok(CreatePlan(request)));
-app.MapPost("/api/generation/generate", (GenerationRequest request) =>
+app.MapPost("/api/generation/generate", async (GenerationRequest request) =>
 {
     var plan = CreatePlan(request);
-    var ignored = request.IgnoredPaths ?? [];
-    var overwrite = request.OverwritePaths ?? [];
-    var unresolved = plan.Files.Where(x => x.Action == PlannedFileAction.Conflict && !ignored.Contains(x.Path, StringComparer.OrdinalIgnoreCase) && !overwrite.Contains(x.Path, StringComparer.OrdinalIgnoreCase)).ToArray();
-    if (unresolved.Length > 0) return Results.Conflict(new ExecutionResult(false, ["Generation plan contains unresolved conflicts; no files were modified."], plan));
-    var logs = new List<string>();
-    foreach (var file in plan.Files)
+    var root = string.IsNullOrWhiteSpace(request.Project) ? targetProject : Path.GetFullPath(request.Project);
+    var entity = FindEntity(root, request.Entity);
+    var layout = AbpProjectLayoutResolver.Resolve(root, entity);
+    GenerationValidationResult validation;
+    try { validation = await GenerationWorkflow.ValidateAsync(plan, layout, request.IgnoredPaths, request.OverwritePaths); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new ExecutionResult(false, [exception.Message], plan)); }
+    if (!validation.Succeeded) return Results.Ok(new ExecutionResult(false, validation.Logs, plan));
+    try
     {
-        if (file.Action == PlannedFileAction.Conflict && ignored.Contains(file.Path, StringComparer.OrdinalIgnoreCase)) { logs.Add($"KEEP     {file.Path}"); continue; }
-        if (file.Action is not (PlannedFileAction.Create or PlannedFileAction.Update or PlannedFileAction.Conflict)) continue;
-        if (file.Action == PlannedFileAction.Conflict && !string.Equals(File.ReadAllText(file.Path), file.CurrentContent, StringComparison.Ordinal))
-            return Results.Conflict(new ExecutionResult(false, [$"Conflict target changed since preview: {file.Path}"], plan));
-        Directory.CreateDirectory(Path.GetDirectoryName(file.Path)!);
-        File.WriteAllText(file.Path, file.Content);
-        logs.Add($"{(file.Action == PlannedFileAction.Conflict ? "OVERWRITE" : file.Action.ToString().ToUpperInvariant()),-8} {file.Path}");
+        var writes = GenerationWorkflow.Apply(plan, layout.SolutionRoot, request.IgnoredPaths, request.OverwritePaths);
+        return Results.Ok(new ExecutionResult(true, validation.Logs.Concat(writes).ToArray(), plan));
     }
-    if (logs.Count == 0) logs.Add("No generated files require changes.");
-    return Results.Ok(new ExecutionResult(true, logs, plan));
+    catch (Exception exception) when (exception is IOException or InvalidOperationException or AggregateException)
+    { return Results.Conflict(new ExecutionResult(false, [exception.Message], plan)); }
 });
 app.MapPost("/api/generation/validate", async (GenerationRequest request) =>
 {
@@ -95,18 +92,10 @@ app.MapPost("/api/generation/validate", async (GenerationRequest request) =>
     var entity = FindEntity(root, request.Entity);
     var layout = AbpProjectLayoutResolver.Resolve(root, entity);
     var plan = CreatePlan(request);
-    if (plan.HasConflicts) return Results.Conflict(new ExecutionResult(false, ["Generation plan contains conflicts."], plan));
-    var logs = new List<string>();
-    foreach (var project in new[] { layout.ContractsProject, layout.ApplicationProject, layout.EntityFrameworkCoreProject })
-    {
-        var csproj = Directory.EnumerateFiles(project, "*.csproj").Single();
-        var result = await RunProcessAsync("dotnet", $"build \"{csproj}\" --nologo");
-        logs.Add($"> dotnet build {Path.GetFileName(csproj)} --nologo");
-        logs.Add(result.Output);
-        if (result.ExitCode != 0) return Results.Ok(new ExecutionResult(false, logs, plan));
-    }
-    logs.Add("Validation passed.");
-    return Results.Ok(new ExecutionResult(true, logs, plan));
+    GenerationValidationResult validation;
+    try { validation = await GenerationWorkflow.ValidateAsync(plan, layout); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new ExecutionResult(false, [exception.Message], plan)); }
+    return Results.Ok(new ExecutionResult(validation.Succeeded, validation.Logs, plan));
 });
 app.MapPost("/api/generation/format", (GenerationRequest request) =>
 {
@@ -122,16 +111,6 @@ GenerationPlan CreatePlan(GenerationRequest request)
     var root = string.IsNullOrWhiteSpace(request.Project) ? targetProject : Path.GetFullPath(request.Project);
     var entity = FindEntity(root, request.Entity);
     return GenerationService.CreateDtoPlan(entity, AbpProjectLayoutResolver.Resolve(root, entity), DescriptorStore.Load(root, entity.Name));
-}
-
-static async Task<ProcessResult> RunProcessAsync(string fileName, string arguments)
-{
-    using var process = Process.Start(new ProcessStartInfo(fileName, arguments) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true })
-        ?? throw new InvalidOperationException($"Could not start {fileName}.");
-    var output = await process.StandardOutput.ReadToEndAsync();
-    var error = await process.StandardError.ReadToEndAsync();
-    await process.WaitForExitAsync();
-    return new ProcessResult(process.ExitCode, string.Concat(output, error));
 }
 
 static EntityModel FindEntity(string root, string requested)

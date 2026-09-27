@@ -6,7 +6,8 @@ public sealed record AbpProjectLayout(
     string ContractsProject,
     string ApplicationProject,
     string EntityFrameworkCoreProject,
-    string FeatureFolder);
+    string FeatureFolder,
+    AbpVersionProfile? AbpProfile = null);
 
 public static class AbpProjectLayoutResolver
 {
@@ -24,7 +25,7 @@ public static class AbpProjectLayoutResolver
             if (!Directory.Exists(required)) throw new InvalidOperationException($"Required ABP project was not found: {required}");
         }
         var feature = string.Join(Path.DirectorySeparatorChar, entity.Namespace.Split('.').Skip(2));
-        return new AbpProjectLayout(solutionRoot, domain, contracts, application, efCore, feature);
+        return new AbpProjectLayout(solutionRoot, domain, contracts, application, efCore, feature, AbpVersionProfileResolver.Resolve(domain));
     }
 
     private static string FindSolutionRoot(string startingDirectory)
